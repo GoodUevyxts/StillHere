@@ -1,0 +1,29 @@
+const test=require('node:test');const assert=require('node:assert/strict');const vm=require('node:vm');const fs=require('node:fs');const path=require('node:path');
+const dist=path.join(__dirname,'../dist');
+function boot(saved,legacy){
+ let now=100000,rafId=0;const frames=new Map();const elements=new Map();const events={};let stored=saved?JSON.stringify(saved):null;
+ class Element {
+  constructor(tag='DIV'){this.tagName=tag;this.children=[];this.listeners={};this.style={setProperty(){}};this.dataset={};this.textContent='';this.value='';this.checked=false;this.hidden=false;this.open=false;this.clientWidth=550;this.clientHeight=290;this.offsetWidth=172;this.classList={add(){},remove(){},toggle(){}};}
+  addEventListener(t,fn){(this.listeners[t]??=[]).push(fn)}
+  emit(t,e={}){for(const f of this.listeners[t]||[])f({target:this,preventDefault(){},detail:1,...e})}
+  setAttribute(){} append(...els){this.children.push(...els)}prepend(el){this.children.unshift(el)}replaceChildren(...els){this.children=els}
+  get lastElementChild(){return {remove:()=>this.children.pop()}}getContext(){return {fillRect(){},strokeRect(){}}}
+  focus(){}setPointerCapture(){}setCustomValidity(v){this.validation=v}reportValidity(){}contains(el){return this===el||this.children.includes(el)}remove(){}click(){this.emit('click')}
+  showModal(){this.open=true}close(){this.open=false;this.emit('close')}
+ }
+ const html=fs.readFileSync(path.join(dist,'index.html'),'utf8');for(const [,id] of html.matchAll(/id="([^"]+)"/g))elements.set('#'+id,new Element());
+ const controls=['left','right','rotate','drop'].map(action=>{const e=new Element('BUTTON');e.dataset.block=action;return e;});
+ const document={body:new Element('BODY'),hidden:false,querySelector(q){assert(elements.has(q),'Missing HTML element '+q);return elements.get(q)},querySelectorAll(){return controls},createElement:tag=>new Element(tag.toUpperCase()),createTextNode:t=>t,addEventListener(t,f){events[t]=f}};
+ const math=Object.create(Math);math.random=()=>.5;
+ class FakeDate extends Date{constructor(...args){super(...(args.length?args:[now]))}static now(){return now}}
+ const context=vm.createContext({document,window:{addEventListener(){}},localStorage:{getItem:k=>k==='stillhere-v1'?JSON.stringify(legacy||null):stored,setItem(k,v){stored=v}},Date:FakeDate,performance:{now:()=>now},Math:math,setInterval(){},setTimeout(){return 1},clearTimeout(){},requestAnimationFrame:f=>{frames.set(++rafId,f);return rafId},cancelAnimationFrame:id=>frames.delete(id),Blob,URL});
+ for(const file of ['blocks.js','game.js','app.js'])vm.runInContext(fs.readFileSync(path.join(dist,file),'utf8'),context,{filename:file});
+ return {context,el:q=>elements.get(q),document,events,run:s=>vm.runInContext(s,context),advance(ms){now+=ms},frame(){const batch=[...frames.values()];frames.clear();batch.forEach(f=>f(now));},saved:()=>JSON.parse(stored),math};
+}
+test('page boots, accepted clicks update score, and 100 clicks change level',()=>{const a=boot();for(let i=0;i<100;i++){a.advance(1000);a.el('#inspect').emit('click');}assert.equal(a.run('state.level'),2);assert.equal(a.el('#score').textContent,'1,100');assert.equal(a.saved().clicks,100);});
+test('hold cancel earns nothing, a completed hold earns exactly one click',()=>{const a=boot();a.el('#hold').emit('pointerdown',{button:0,pointerId:1});a.advance(1000);a.el('#hold').emit('pointerup');a.frame();assert.equal(a.run('state.clicks'),0);a.advance(2000);a.el('#hold').emit('pointerdown',{button:0,pointerId:1});a.advance(3000);a.frame();a.el('#hold').emit('pointerup');assert.equal(a.run('state.clicks'),1);a.frame();assert.equal(a.run('state.clicks'),1);});
+test('visibility change cancels timed inspection and hidden time earns nothing',()=>{const a=boot();a.el('#deep').emit('click');a.document.hidden=true;a.events.visibilitychange();a.advance(10000);a.frame();a.run('tick()');assert.equal(a.run('state.clicks'),0);assert.equal(a.run('state.waitMs'),0);});
+test('theme, goal and manual reset are wired to controls and persistence',()=>{const a=boot();a.el('#theme').value='night';a.el('#theme').emit('change');a.el('#goal-input').value='50';a.el('#goal-form').emit('submit');assert.equal(a.saved().goal,50);assert.equal(a.document.body.dataset.theme,'night');a.el('#inspect').emit('click');a.el('#reset').emit('click');assert(a.el('#reset-dialog').open);a.el('#cancel-reset').emit('click');assert.equal(a.run('state.clicks'),1);a.el('#reset').emit('click');a.el('#confirm-reset').emit('click');assert.equal(a.run('state.clicks'),0);assert.equal(a.saved().theme,'night');assert.equal(a.el('#score').textContent,'0');});
+test('fictional error persists on closing puzzle and clears once for 100 points on win',()=>{const a=boot({clicks:20,level:1,progress:20,errorPending:'PEBBLE_418'});a.el('#repair').emit('click');a.el('#blocks-later').emit('click');assert.equal(a.run('state.errorPending'),'PEBBLE_418');a.el('#repair').emit('click');a.run('puzzle.board[9]=[0,0,1,1,1,1]; puzzle.piece.x=0; blockAction("drop")');assert.equal(a.run('state.errorPending'),'');assert.equal(a.run('state.gamesWon'),1);assert.equal(a.el('#blocks-score').textContent,'10 / 10');a.run('finishRepair()');assert.equal(a.run('state.gamesWon'),1);});
+test('legacy name migrates but old automatic counts are not game clicks',()=>{const a=boot(null,{name:'Granite',count:999});assert.equal(a.run('state.name'),'Granite');assert.equal(a.run('state.clicks'),0);assert.equal(a.run('state.legacyInspections'),999);});
+test('random errors trigger after threshold, do not replace pending errors or interrupt rare movement',()=>{const a=boot({clicks:20});a.math.random=()=>0;a.run('maybeError(false)');assert.match(a.run('state.errorPending'),/PEBBLE_418/);a.run('state.errorPending=""; state.clicks=40; maybeError(true)');assert.equal(a.run('state.errorPending'),'');});
