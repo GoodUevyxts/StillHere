@@ -208,7 +208,7 @@ document.addEventListener('visibilitychange',()=>{lastTick=performance.now();if(
 window.addEventListener('pagehide',save);
 window.addEventListener('storage',e=>{
   if(e.key!==KEY || !e.newValue)return;
-  try {state=G.restore(JSON.parse(e.newValue));cancelOperation();$('#name-input').value=state.name;$('#calm').checked=state.calm;render();}catch{}
+  try {state=G.restore(JSON.parse(e.newValue));cancelOperation();$('#name-input').value=state.name;$('#calm').checked=state.calm;$('#goal-input').value=state.goal;render();}catch{}
 });
 window.addEventListener('resize',()=>{layoutField();inspect.style.left='calc(50% - 86px)';});
 // Personalisation, goal calculations and a deliberately fictional error-repair game.

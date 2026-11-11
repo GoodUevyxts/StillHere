@@ -70,10 +70,10 @@
     return correct ? reward(s, random) : { type: 'miss' };
   }
   function wait(s, ms, visible) {
-    if (visible && Number.isFinite(ms) && ms > 0) s.waitMs += Math.floor(Math.min(ms, 2000));
+    if (visible && Number.isFinite(ms) && ms > 0) s.waitMs += Math.floor(ms);
     return unlock(s);
   }
-  function difficulty(level) { return { size: Math.max(44, 106 - (level - 1) * 7), decoys: Math.min(12, Math.max(0, level - 1)), contrast: Math.max(.65, 1 - (level - 1) * .025) }; }
+  function difficulty(level) { level = Math.min(level, 13); return { size: Math.max(44, 106 - (level - 1) * 7), decoys: Math.min(12, Math.max(0, level - 1)), contrast: Math.max(.65, 1 - (level - 1) * .025) }; }
   function score(s) { return s.clicks * 10 + (s.level - 1) * 100 + s.moves * 1000 + s.gamesWon * 100; }
   function goalStats(s) { const remaining = Math.max(0,s.goal-s.clicks); return { remaining, chance: (1 - Math.pow(1-RULES.moveChance, remaining)) * 100 }; }
   const api = { score, goalStats, RULES, BADGES, fresh, restore, unlock, attempt, reward, click, wait, difficulty };
